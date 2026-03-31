@@ -1,91 +1,123 @@
-import os
-import logging
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
+import requests
+import os
+import sqlite3
 
-# Initialize Flask app
 app = Flask(__name__)
 
-# Config
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///srishti.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# ✅ FULL CORS FIX
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-# Init DB
-db = SQLAlchemy(app)
+# ✅ DB SETUP
+conn = sqlite3.connect("srishti.db", check_same_thread=False)
+cursor = conn.cursor()
 
-# Enable CORS
-CORS(app)
-
-# Ensure logs folder exists
-os.makedirs("logs", exist_ok=True)
-
-# Logging setup
-logging.basicConfig(
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler("logs/srishti.log"),
-        logging.StreamHandler()
-    ]
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message TEXT,
+    response TEXT,
+    timestamp TEXT
 )
+""")
 
-logger = logging.getLogger(__name__)
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT,
+    timestamp TEXT
+)
+""")
 
-# ======================
-# SIMPLE MODEL (SAFE)
-# ======================
+conn.commit()
 
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50))
+# 🔑 OPENROUTER KEY
+OPENROUTER_API_KEY = "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"
 
-# ======================
-# ROUTES
-# ======================
+# =========================
+# BASIC ROUTES
+# =========================
 
 @app.route("/")
 def home():
-    return jsonify({
-        "name": "Srishti AI",
-        "status": "running"
-    })
+    return jsonify({"status": "Srishti AI Running"})
 
 @app.route("/health")
 def health():
-    return jsonify({
-        "status": "healthy",
-        "time": datetime.utcnow().isoformat()
-    })
+    return jsonify({"status": "ok", "time": datetime.utcnow().isoformat()})
 
-@app.route("/api/chat", methods=["POST"])
+# =========================
+# CHAT API (MAIN)
+# =========================
+
+@app.route("/api/chat", methods=["POST", "OPTIONS"])
 def chat():
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"})
+
     data = request.json
-    message = data.get("message", "")
+    user_message = data.get("message", "")
 
-    return jsonify({
-        "reply": f"You said: {message}"
-    })
+    try:
+        # 🔥 OPENROUTER CALL
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "deepseek/deepseek-chat",
+                "messages": [
+                    {"role": "user", "content": user_message}
+                ]
+            }
+        )
 
-# ======================
-# ERROR HANDLING
-# ======================
+        result = response.json()
+        ai_reply = result["choices"][0]["message"]["content"]
 
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({"error": "Not found"}), 404
+    except Exception as e:
+        ai_reply = str(e)
 
-@app.errorhandler(500)
-def server_error(e):
-    return jsonify({"error": "Server error"}), 500
+    # ✅ SAVE LOG
+    cursor.execute("INSERT INTO messages (message, response, timestamp) VALUES (?, ?, ?)",
+                   (user_message, ai_reply, datetime.utcnow().isoformat()))
+    conn.commit()
 
-# ======================
-# RUN
-# ======================
+    return jsonify({"reply": ai_reply})
 
-if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
+# =========================
+# IMAGE API
+# =========================
 
-    port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+@app.route("/api/image", methods=["POST"])
+def image():
+    prompt = request.json.get("prompt", "")
+
+    # using Pollinations (free real image)
+    image_url = f"https://image.pollinations.ai/prompt/{prompt}"
+
+    return jsonify({"image_url": image_url})
+
+# =========================
+# AUDIO API (TTS BASIC)
+# =========================
+
+@app.route("/api/audio", methods=["POST"])
+def audio():
+    text = request.json.get("text", "")
+    return jsonify({"audio": f"TTS not enabled yet: {text}"})
+
+# =========================
+# LOGS / ANALYTICS
+# =========================
+
+@app.route("/api/analytics")
+def analytics():
+    cursor.execute("SELECT COUNT(*) FROM messages")
+    count = cursor.fetchone()[0]
+
+    cursor
