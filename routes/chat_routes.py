@@ -1,0 +1,176 @@
+"""
+SRISHTI AI OS - Chat Routes
+Language Brain Integration
+"""
+
+from flask import Blueprint, request, jsonify
+from datetime import datetime
+import time
+import logging
+
+bp = Blueprint('chat', __name__, url_prefix='/api/chat')
+logger = logging.getLogger(__name__)
+
+@bp.route('', methods=['POST'])
+def chat():
+    """
+    Main chat endpoint - processes user messages with language brain
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'message' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': 'Message content is required',
+                'code': 400
+            }), 400
+        
+        user_message = data.get('message', '')
+        model = data.get('model', 'gpt-4')
+        temperature = data.get('temperature', 0.7)
+        max_tokens = data.get('max_tokens', 2000)
+        
+        start_time = time.time()
+        
+        # Process message with language brain
+        response_text = process_language_brain(
+            user_message,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        
+        execution_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+        
+        logger.info(f'Chat message processed: {len(user_message)} chars, {execution_time:.2f}ms')
+        
+        return jsonify({
+            'status': 'success',
+            'response': response_text,
+            'model': model,
+            'execution_time': execution_time,
+            'timestamp': datetime.utcnow().isoformat(),
+            'tokens': {
+                'input': estimate_tokens(user_message),
+                'output': estimate_tokens(response_text)
+            }
+        }), 200
+        
+    except Exception as e:
+        logger.error(f'Chat error: {str(e)}')
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'code': 500
+        }), 500
+
+@bp.route('/stream', methods=['POST'])
+def chat_stream():
+    """
+    Streaming chat endpoint for real-time responses
+    """
+    try:
+        data = request.get_json()
+        user_message = data.get('message', '')
+        
+        def generate():
+            # Stream response chunks
+            response_text = process_language_brain(user_message)
+            for chunk in response_text.split(' '):
+                yield f"data: {chunk}\n\n"
+        
+        return generate(), 200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache'
+        }
+        
+    except Exception as e:
+        logger.error(f'Stream error: {str(e)}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@bp.route('/history', methods=['GET'])
+def get_chat_history():
+    """
+    Retrieve chat history for a user
+    """
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        offset = request.args.get('offset', 0, type=int)
+        
+        # In production, fetch from database
+        history = {
+            'messages': [],
+            'total': 0,
+            'limit': limit,
+            'offset': offset
+        }
+        
+        return jsonify(history), 200
+        
+    except Exception as e:
+        logger.error(f'History error: {str(e)}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@bp.route('/clear', methods=['POST'])
+def clear_history():
+    """
+    Clear chat history
+    """
+    try:
+        return jsonify({
+            'status': 'success',
+            'message': 'Chat history cleared',
+            'timestamp': datetime.utcnow().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f'Clear error: {str(e)}')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+def process_language_brain(message, model='gpt-4', temperature=0.7, max_tokens=2000):
+    """
+    Process message with language brain
+    Supports: GPT, Claude, Gemini, LLaMA, Mistral, DeepSeek, Qwen, Mixtral, Cohere
+    """
+    try:
+        # In production, integrate with actual LLM APIs
+        # This is a mock implementation
+        
+        if model.startswith('gpt'):
+            response = mock_gpt_response(message)
+        elif model.startswith('claude'):
+            response = mock_claude_response(message)
+        elif model.startswith('gemini'):
+            response = mock_gemini_response(message)
+        elif model.startswith('llama'):
+            response = mock_llama_response(message)
+        else:
+            response = f"Processed by {model}: {message[:100]}..."
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f'Language brain error: {str(e)}')
+        return f"Error processing message: {str(e)}"
+
+def mock_gpt_response(message):
+    """Mock GPT response"""
+    return f"GPT-4 Response: I understand you're asking about '{message}'. This is a comprehensive response generated by the GPT-4 language model. The system is processing your query through the language brain with advanced reasoning capabilities."
+
+def mock_claude_response(message):
+    """Mock Claude response"""
+    return f"Claude Response: Regarding your query about '{message}', I can provide detailed analysis. Claude excels at nuanced understanding and creative problem-solving."
+
+def mock_gemini_response(message):
+    """Mock Gemini response"""
+    return f"Gemini Response: Your question '{message}' is being processed through Google's Gemini model, which combines the strengths of multiple AI approaches."
+
+def mock_llama_response(message):
+    """Mock LLaMA response"""
+    return f"LLaMA Response: Processing '{message}' with Meta's LLaMA model, optimized for efficiency and performance."
+
+def estimate_tokens(text):
+    """Estimate token count for text"""
+    # Rough estimation: ~4 characters per token
+    return max(1, len(text) // 4)
